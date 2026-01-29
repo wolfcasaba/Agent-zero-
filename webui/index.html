@@ -196,6 +196,8 @@
                         <!-- Tab Navigation -->
                         <div class="settings-tabs-container">
                             <div class="settings-tabs">
+                                <div class="settings-tab" :class="{'active': activeTab === 'ai_provider'}"
+                                    @click="switchTab('ai_provider')" title="AI Provider">AI Provider</div>
                                 <div class="settings-tab" :class="{'active': activeTab === 'agent'}"
                                     @click="switchTab('agent')" title="Agent Settings">Agent Settings</div>
                                 <div class="settings-tab" :class="{'active': activeTab === 'external'}"

@@ -891,10 +891,132 @@ def _merge_provider_defaults(
     return provider_name, kwargs
 
 
+class ClaudeCLIChatWrapper(LiteLLMChatWrapper):
+    """
+    LangChain-compatible wrapper that uses Claude CLI via the hybrid_ai_wrapper.
+    No API cost with Claude Max subscription.
+    """
+
+    def __init__(self, model_config: Optional[ModelConfig] = None, **kwargs: Any):
+        # Initialize parent with dummy values since we won't use LiteLLM
+        super().__init__(
+            model="claude-cli",
+            provider="claude-cli",
+            model_config=model_config,
+            **kwargs,
+        )
+        from python.helpers.hybrid_ai_wrapper import AIManager
+        self._ai_manager = AIManager(provider="claude-cli", **kwargs)
+
+    def _call(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        import asyncio
+        msgs = self._convert_messages(messages)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import nest_asyncio
+                nest_asyncio.apply()
+        except RuntimeError:
+            pass
+        response = asyncio.run(self._ai_manager.chat(msgs))
+        return response.content
+
+    def _stream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        import asyncio
+
+        msgs = self._convert_messages(messages)
+
+        async def _collect_stream():
+            chunks = []
+            async for chunk in self._ai_manager.stream(msgs):
+                chunks.append(chunk)
+            return chunks
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import nest_asyncio
+                nest_asyncio.apply()
+        except RuntimeError:
+            pass
+
+        chunks = asyncio.run(_collect_stream())
+        for chunk_text in chunks:
+            if chunk_text:
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(content=chunk_text)
+                )
+
+    async def _astream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        msgs = self._convert_messages(messages)
+        async for chunk_text in self._ai_manager.stream(msgs):
+            if chunk_text:
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(content=chunk_text)
+                )
+
+    async def unified_call(
+        self,
+        system_message="",
+        user_message="",
+        messages: List[BaseMessage] | None = None,
+        response_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        reasoning_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        tokens_callback: Callable[[str, int], Awaitable[None]] | None = None,
+        rate_limiter_callback=None,
+        **kwargs: Any,
+    ) -> Tuple[str, str]:
+        if not messages:
+            messages = []
+        if system_message:
+            messages.insert(0, SystemMessage(content=system_message))
+        if user_message:
+            messages.append(HumanMessage(content=user_message))
+
+        msgs = self._convert_messages(messages)
+        full_response = ""
+        stream = response_callback is not None or tokens_callback is not None
+
+        if stream:
+            async for chunk_text in self._ai_manager.stream(msgs):
+                if chunk_text:
+                    full_response += chunk_text
+                    if response_callback:
+                        await response_callback(chunk_text, full_response)
+                    if tokens_callback:
+                        await tokens_callback(chunk_text, approximate_tokens(chunk_text))
+        else:
+            response = await self._ai_manager.chat(msgs)
+            full_response = response.content
+
+        return full_response, ""  # No reasoning support for CLI
+
+
 def get_chat_model(
     provider: str, name: str, model_config: Optional[ModelConfig] = None, **kwargs: Any
 ) -> LiteLLMChatWrapper:
     orig = provider.lower()
+    # Route claude-cli to the CLI wrapper
+    if orig in ("claude-cli", "claude_cli"):
+        return ClaudeCLIChatWrapper(model_config=model_config)
     provider_name, kwargs = _merge_provider_defaults("chat", orig, kwargs)
     return _get_litellm_chat(
         LiteLLMChatWrapper, name, provider_name, model_config, **kwargs

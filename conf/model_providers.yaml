@@ -17,6 +17,9 @@
 #                     This is useful for `api_base`, `extra_headers`, etc.
 
 chat:
+  claude_cli:
+    name: Claude CLI (Max subscription)
+    litellm_provider: claude-cli
   a0_venice:
     name: Agent Zero Venice.ai
     litellm_provider: openai

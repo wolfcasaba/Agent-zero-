@@ -1274,9 +1274,119 @@ def convert_out(settings: Settings) -> SettingsOutput:
         "tab": "backup",
     }
 
+    # AI Provider section (hybrid provider settings)
+    ai_provider_fields: list[SettingsField] = []
+
+    from python.helpers.ai_settings import AISettingsManager
+    ai_mgr = AISettingsManager()
+    ai_settings = ai_mgr.load()
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_active",
+            "title": "Active AI Provider",
+            "description": "Select the AI provider to use. Claude CLI uses your Claude Max subscription (no API cost). Other providers require API keys.",
+            "type": "select",
+            "value": ai_settings.active_provider,
+            "options": [
+                {"value": "claude-cli", "label": "Claude CLI (Max subscription - free)"},
+                {"value": "claude-api", "label": "Claude API (Anthropic - paid)"},
+                {"value": "openai", "label": "OpenAI (GPT-4o, GPT-4)"},
+                {"value": "ollama", "label": "Ollama (Local models - free)"},
+                {"value": "openrouter", "label": "OpenRouter (100+ models)"},
+                {"value": "groq", "label": "Groq (Fast inference)"},
+                {"value": "google", "label": "Google Gemini"},
+                {"value": "custom", "label": "Custom OpenAI-compatible endpoint"},
+            ],
+        }
+    )
+
+    # Get provider settings for current active provider
+    active_prov = getattr(ai_settings, ai_settings.active_provider.replace("-", "_"), None)
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_info",
+            "title": "",
+            "type": "html",
+            "value": '<div style="padding:0.75rem;background:rgba(0,180,0,0.1);border-left:3px solid #00b400;border-radius:4px;margin-bottom:0.5rem;">'
+            'Claude CLI is configured. No API cost with Claude Max subscription.</div>'
+            if ai_settings.active_provider == "claude-cli"
+            else '<div style="padding:0.75rem;background:rgba(0,120,255,0.1);border-left:3px solid #0078ff;border-radius:4px;margin-bottom:0.5rem;">'
+            f'Using <b>{ai_settings.active_provider}</b> provider. API key may be required.</div>',
+        }
+    )
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_api_key",
+            "title": "API Key",
+            "description": "API key for the selected provider. Leave empty to use environment variable.",
+            "type": "password",
+            "value": (active_prov.api_key if active_prov and active_prov.api_key else ""),
+            "hidden": ai_settings.active_provider in ("claude-cli", "ollama"),
+        }
+    )
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_api_base",
+            "title": "API Base URL",
+            "description": "Custom API base URL. Only needed for Ollama, custom endpoints, or non-default API URLs.",
+            "type": "text",
+            "value": (active_prov.api_base if active_prov else ""),
+            "hidden": ai_settings.active_provider not in ("ollama", "custom"),
+        }
+    )
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_model",
+            "title": "Model Name",
+            "description": "Model to use with the selected provider.",
+            "type": "text",
+            "value": (active_prov.model if active_prov else ""),
+            "hidden": ai_settings.active_provider == "claude-cli",
+        }
+    )
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_temperature",
+            "title": "Temperature",
+            "description": "Controls randomness in responses. Lower = more deterministic.",
+            "type": "range",
+            "min": 0,
+            "max": 1,
+            "step": 0.1,
+            "value": (active_prov.temperature if active_prov else 0.7),
+            "hidden": ai_settings.active_provider == "claude-cli",
+        }
+    )
+
+    ai_provider_fields.append(
+        {
+            "id": "ai_provider_max_tokens",
+            "title": "Max Tokens",
+            "description": "Maximum number of tokens in the response.",
+            "type": "number",
+            "value": (active_prov.max_tokens if active_prov else 4096),
+            "hidden": ai_settings.active_provider == "claude-cli",
+        }
+    )
+
+    ai_provider_section: SettingsSection = {
+        "id": "ai_provider",
+        "title": "AI Provider",
+        "description": "Configure the hybrid AI provider system. Use Claude CLI for free with Max subscription, or connect to any supported API provider.",
+        "fields": ai_provider_fields,
+        "tab": "ai_provider",
+    }
+
     # Add the section to the result
     result: SettingsOutput = {
         "sections": [
+            ai_provider_section,
             agent_section,
             chat_model_section,
             util_model_section,
@@ -1324,14 +1434,46 @@ def convert_in(settings: dict) -> Settings:
                 )
 
                 if not should_skip:
+                    # Special handling for AI provider settings
+                    if field["id"].startswith("ai_provider_"):
+                        _handle_ai_provider_field(field)
                     # Special handling for browser_http_headers
-                    if field["id"] == "browser_http_headers" or field["id"].endswith("_kwargs"):
+                    elif field["id"] == "browser_http_headers" or field["id"].endswith("_kwargs"):
                         current[field["id"]] = _env_to_dict(field["value"])
                     elif field["id"].startswith("api_key_"):
                         current["api_keys"][field["id"]] = field["value"]
                     else:
                         current[field["id"]] = field["value"]
     return current
+
+
+def _handle_ai_provider_field(field: dict):
+    """Save AI provider fields to ai_settings.json"""
+    from python.helpers.ai_settings import AISettingsManager
+    mgr = AISettingsManager()
+    settings = mgr.load()
+
+    field_id = field["id"]
+    value = field["value"]
+
+    if field_id == "ai_provider_active":
+        settings.active_provider = value
+    else:
+        attr_name = settings.active_provider.replace("-", "_")
+        provider = getattr(settings, attr_name, None)
+        if provider:
+            field_map = {
+                "ai_provider_api_key": "api_key",
+                "ai_provider_api_base": "api_base",
+                "ai_provider_model": "model",
+                "ai_provider_temperature": "temperature",
+                "ai_provider_max_tokens": "max_tokens",
+            }
+            attr = field_map.get(field_id)
+            if attr and hasattr(provider, attr):
+                setattr(provider, attr, value)
+
+    mgr.save(settings)
 
 def get_settings() -> Settings:
     global _settings
