@@ -381,25 +381,10 @@ document.addEventListener('alpine:init', function () {
 
             updateFilteredSections() {
                 // Filter sections based on active tab
-                if (this.activeTab === 'agent') {
+                const knownTabs = ['agent', 'external', 'developer', 'mcp', 'backup', 'ai_provider'];
+                if (knownTabs.includes(this.activeTab)) {
                     this.filteredSections = this.settingsData.sections?.filter(section =>
-                        section.tab === 'agent'
-                    ) || [];
-                } else if (this.activeTab === 'external') {
-                    this.filteredSections = this.settingsData.sections?.filter(section =>
-                        section.tab === 'external'
-                    ) || [];
-                } else if (this.activeTab === 'developer') {
-                    this.filteredSections = this.settingsData.sections?.filter(section =>
-                        section.tab === 'developer'
-                    ) || [];
-                } else if (this.activeTab === 'mcp') {
-                    this.filteredSections = this.settingsData.sections?.filter(section =>
-                        section.tab === 'mcp'
-                    ) || [];
-                } else if (this.activeTab === 'backup') {
-                    this.filteredSections = this.settingsData.sections?.filter(section =>
-                        section.tab === 'backup'
+                        section.tab === this.activeTab
                     ) || [];
                 } else {
                     // For any other tab, show nothing since those tabs have custom UI

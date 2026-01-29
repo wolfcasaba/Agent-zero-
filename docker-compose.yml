@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  agent-zero:
+    build:
+      context: .
+      dockerfile: DockerfileLocal
+    ports:
+      - "50001:80"
+    volumes:
+      - ./data:/a0
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+
+  # Optional: Ollama for local models
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:
